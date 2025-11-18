@@ -101,7 +101,7 @@ class Streamer:
         wait=wait_exponential(multiplier=1, min=4, max=10),
         retry=retry_if_exception_type(DownloadError),
     )
-    async def create_streaming_response(self, url: str, headers: dict):
+    async def create_streaming_response_old(self, url: str, headers: dict):
         """
         Creates and sends a streaming request.
 
@@ -132,6 +132,24 @@ class Streamer:
             logger.error(f"Error creating streaming response: {e}")
             raise RuntimeError(f"Error creating streaming response: {e}")
 
+    async def create_streaming_response(client, url, headers):
+        # attempt initial request
+        async with client.stream("GET", url, headers=headers, timeout=None) as r:
+            if r.status_code == 416:
+                logger.warning("416 detected, retrying request without Range")
+                # remove range header
+                clean_headers = {k: v for k, v in headers.items() if k.lower() != "range"}
+                async with client.stream("GET", url, headers=clean_headers, timeout=None) as r2:
+                    return StreamingResponse(r2.aiter_raw(), status_code=200)
+    
+            try:
+                r.raise_for_status()
+            except Exception:
+                logger.error(f"HTTP error {r.status_code} while creating streaming response")
+                raise
+    
+            return StreamingResponse(r.aiter_raw(), status_code=r.status_code)
+    
     async def stream_content(self) -> typing.AsyncGenerator[bytes, None]:
         """
         Streams the content from the response.
