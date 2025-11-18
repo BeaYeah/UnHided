@@ -202,14 +202,26 @@ class Streamer:
         return f"{size:.2f} {units[n]}"
 
     def parse_content_range(self):
-        content_range = self.response.headers.get("Content-Range", "")
-        if content_range:
-            range_info = content_range.split()[-1]
-            self.start_byte, self.end_byte, self.total_size = map(int, range_info.replace("/", "-").split("-"))
-        else:
-            self.start_byte = 0
-            self.total_size = int(self.response.headers.get("Content-Length", 0))
-            self.end_byte = self.total_size - 1 if self.total_size > 0 else 0
+    content_range = self.response.headers.get("Content-Range")
+    if content_range:
+        # Example: "bytes 0-1023/1048576"
+        _, range_spec = content_range.split(" ", 1)
+        byte_range, size = range_spec.split("/")
+        start, end = map(int, byte_range.split("-"))
+        total = int(size)
+
+        # Validate to prevent 416 offset errors
+        if start >= total or end >= total:
+            logger.warning(f"Invalid range detected. start={start}, end={end}, total={total}. Resetting to full.")
+            start, end = 0, total - 1
+
+        self.start_byte = start
+        self.end_byte = end
+        self.total_size = total
+    else:
+        self.start_byte = 0
+        self.total_size = int(self.response.headers.get("Content-Length", 0))
+        self.end_byte = self.total_size - 1 if self.total_size > 0 else 0
 
     async def get_text(self, url: str, headers: dict):
         """
